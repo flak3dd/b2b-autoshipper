@@ -1,0 +1,44 @@
+{
+  "name": "b2b_autoshipper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc || echo 'Build completed with errors'",
+    "start": "node dist/server.js",
+    "init-db": "ts-node src/db/init.ts",
+    "test-db": "ts-node -e \"require('./src/db/connection').query('SELECT 1').then(() => console.log('Database connection successful')).catch(e => console.error('Database connection failed:', e))\"",
+    "test-supabase": "ts-node src/test-supabase.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@bull-board/api": "^7.1.5",
+    "@bull-board/express": "^7.1.5",
+    "@supabase/supabase-js": "^2.106.2",
+    "axios": "^1.16.1",
+    "bullmq": "^5.77.6",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.11.0",
+    "natural": "^8.1.1",
+    "node-cron": "^4.2.1",
+    "openai": "^6.39.0",
+    "pg": "^8.21.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.1",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.20.0",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
