@@ -5,19 +5,26 @@ import cron from 'node-cron';
 import { config, validateConfig } from './config';
 import { logger } from './utils/logger';
 import { initializeDatabase } from './db/connection';
-import { 
-  fulfillmentQueue, 
-  catalogSyncQueue, 
-  pricingSyncQueue, 
-  inventorySyncQueue,
-  closeQueues 
-} from './jobs/queue';
-import { 
-  addCatalogSyncJob, 
-  addPricingSyncJob, 
-  addInventorySyncJob 
-} from './jobs/queue';
 import webhookRoutes from './routes/webhooks';
+
+// Conditionally import queue-related modules to avoid crashes in serverless environments
+let fulfillmentQueue: any, catalogSyncQueue: any, pricingSyncQueue: any, inventorySyncQueue: any;
+let closeQueues: any;
+let addCatalogSyncJob: any, addPricingSyncJob: any, addInventorySyncJob: any;
+
+const isVercelEnvironment = process.env.VERCEL === '1';
+
+if (!isVercelEnvironment) {
+  const queueModule = require('./jobs/queue');
+  fulfillmentQueue = queueModule.fulfillmentQueue;
+  catalogSyncQueue = queueModule.catalogSyncQueue;
+  pricingSyncQueue = queueModule.pricingSyncQueue;
+  inventorySyncQueue = queueModule.inventorySyncQueue;
+  closeQueues = queueModule.closeQueues;
+  addCatalogSyncJob = queueModule.addCatalogSyncJob;
+  addPricingSyncJob = queueModule.addPricingSyncJob;
+  addInventorySyncJob = queueModule.addInventorySyncJob;
+}
 
 const app = express();
 
@@ -119,17 +126,24 @@ async function initialize(): Promise<void> {
     // Validate configuration
     validateConfig();
 
-    // Initialize database
-    logger.info('Initializing database connection');
-    initializeDatabase();
+    // Skip database and queue initialization in serverless/Vercel environment
+    if (!isVercelEnvironment) {
+      // Initialize database
+      logger.info('Initializing database connection');
+      initializeDatabase();
 
-    // Setup cron jobs
-    setupCronJobs();
+      // Setup cron jobs
+      setupCronJobs();
+    } else {
+      logger.info('Skipping database and queue initialization in Vercel environment');
+    }
 
     logger.info('Application initialized successfully');
   } catch (error) {
     logger.error('Failed to initialize application', error);
-    process.exit(1);
+    if (!isVercelEnvironment) {
+      process.exit(1);
+    }
   }
 }
 
@@ -150,12 +164,16 @@ async function shutdown(): Promise<void> {
   logger.info('Shutting down gracefully...');
 
   try {
-    // Close queues
-    await closeQueues();
+    // Close queues only if they were initialized
+    if (closeQueues) {
+      await closeQueues();
+    }
 
-    // Close database connection
-    const { closeDatabase } = require('./db/connection');
-    await closeDatabase();
+    // Close database connection only if it was initialized
+    if (!isVercelEnvironment) {
+      const { closeDatabase } = require('./db/connection');
+      await closeDatabase();
+    }
 
     logger.info('Shutdown completed');
     process.exit(0);

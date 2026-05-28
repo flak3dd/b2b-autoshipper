@@ -1,5 +1,5 @@
 {
-  "buildCommand": "echo 'Skipping build - using existing dist files'",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install"
 }

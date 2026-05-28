@@ -2,8 +2,21 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { addFulfillmentJob, addB2BCustomerJob } from '../jobs/queue';
-import { query } from '../db/connection';
+
+// Conditionally import queue functions to avoid crashes in serverless environments
+let addFulfillmentJob: any, addB2BCustomerJob: any;
+if (process.env.VERCEL !== '1') {
+  const queueModule = require('../jobs/queue');
+  addFulfillmentJob = queueModule.addFulfillmentJob;
+  addB2BCustomerJob = queueModule.addB2BCustomerJob;
+}
+
+// Conditionally import database connection
+let query: any;
+if (process.env.VERCEL !== '1') {
+  const dbModule = require('../db/connection');
+  query = dbModule.query;
+}
 
 // Verify Shopify webhook signature
 export function verifyShopifyWebhook(req: Request): boolean {
@@ -49,26 +62,33 @@ export async function shopifyOrderCreateHandler(req: Request, res: Response): Pr
     const order = req.body;
     logger.info(`Processing order ${order.id} for customer ${order.customer?.email}`);
 
-    // Store order in database
-    await query(
-      `INSERT INTO order_mappings (shopify_order_id, fulfillment_status)
-       VALUES ($1, $2)
-       ON CONFLICT (shopify_order_id)
-       DO UPDATE SET fulfillment_status = EXCLUDED.fulfillment_status, updated_at = NOW()`,
-      [order.id, 'pending']
-    );
+    // Store order in database (skip in serverless environments)
+    if (query) {
+      await query(
+        `INSERT INTO order_mappings (shopify_order_id, fulfillment_status)
+         VALUES ($1, $2)
+         ON CONFLICT (shopify_order_id)
+         DO UPDATE SET fulfillment_status = EXCLUDED.fulfillment_status, updated_at = NOW()`,
+        [order.id, 'pending']
+      );
+    } else {
+      logger.info('Skipping database operation in serverless environment');
+    }
 
     // Check if this is a B2B order
     if (isB2BOrder(order)) {
       logger.info(`Order ${order.id} identified as B2B order`);
 
-      // Add fulfillment job to queue
-      await addFulfillmentJob({
-        orderId: order.id,
-        order,
-      });
-
-      logger.info(`Fulfillment job queued for order ${order.id}`);
+      // Add fulfillment job to queue (skip in serverless environments)
+      if (addFulfillmentJob) {
+        await addFulfillmentJob({
+          orderId: order.id,
+          order,
+        });
+        logger.info(`Fulfillment job queued for order ${order.id}`);
+      } else {
+        logger.info('Skipping queue job in serverless environment');
+      }
     } else {
       logger.info(`Order ${order.id} is not a B2B order, skipping automatic fulfillment`);
     }
@@ -95,22 +115,30 @@ export async function shopifyOrderUpdateHandler(req: Request, res: Response): Pr
     const order = req.body;
     logger.info(`Processing order update ${order.id}`);
 
-    // Update order in database
-    await query(
-      `UPDATE order_mappings 
-       SET fulfillment_status = $1, updated_at = NOW() 
-       WHERE shopify_order_id = $2`,
-      [order.financial_status === 'paid' ? 'processing' : 'pending', order.id]
-    );
+    // Update order in database (skip in serverless environments)
+    if (query) {
+      await query(
+        `UPDATE order_mappings 
+         SET fulfillment_status = $1, updated_at = NOW() 
+         WHERE shopify_order_id = $2`,
+        [order.financial_status === 'paid' ? 'processing' : 'pending', order.id]
+      );
+    } else {
+      logger.info('Skipping database operation in serverless environment');
+    }
 
     // If order is now paid and is B2B, trigger fulfillment
     if (order.financial_status === 'paid' && isB2BOrder(order)) {
       logger.info(`Order ${order.id} is now paid and is B2B, triggering fulfillment`);
 
-      await addFulfillmentJob({
-        orderId: order.id,
-        order,
-      });
+      if (addFulfillmentJob) {
+        await addFulfillmentJob({
+          orderId: order.id,
+          order,
+        });
+      } else {
+        logger.info('Skipping queue job in serverless environment');
+      }
     }
 
     res.status(200).json({ success: true });
@@ -142,13 +170,16 @@ export async function shopifyCustomerCreateHandler(req: Request, res: Response):
     if (isB2BCustomer || hasCompany) {
       logger.info(`Customer ${customer.id} identified as B2B customer`);
 
-      // Add B2B customer processing job to queue
-      await addB2BCustomerJob({
-        customerId: customer.id,
-        customer,
-      });
-
-      logger.info(`B2B customer job queued for customer ${customer.id}`);
+      // Add B2B customer processing job to queue (skip in serverless environments)
+      if (addB2BCustomerJob) {
+        await addB2BCustomerJob({
+          customerId: customer.id,
+          customer,
+        });
+        logger.info(`B2B customer job queued for customer ${customer.id}`);
+      } else {
+        logger.info('Skipping queue job in serverless environment');
+      }
     } else {
       logger.info(`Customer ${customer.id} is not a B2B customer`);
     }
@@ -182,13 +213,16 @@ export async function shopifyCustomerUpdateHandler(req: Request, res: Response):
     if (isB2BCustomer || hasCompany) {
       logger.info(`Customer ${customer.id} updated to B2B status`);
 
-      // Add B2B customer processing job to queue
-      await addB2BCustomerJob({
-        customerId: customer.id,
-        customer,
-      });
-
-      logger.info(`B2B customer job queued for customer ${customer.id}`);
+      // Add B2B customer processing job to queue (skip in serverless environments)
+      if (addB2BCustomerJob) {
+        await addB2BCustomerJob({
+          customerId: customer.id,
+          customer,
+        });
+        logger.info(`B2B customer job queued for customer ${customer.id}`);
+      } else {
+        logger.info('Skipping queue job in serverless environment');
+      }
     }
 
     res.status(200).json({ success: true });
@@ -213,9 +247,9 @@ export async function shopifyProductUpdateHandler(req: Request, res: Response): 
     const product = req.body;
     logger.info(`Processing product update ${product.id}`);
 
-    // Update product in database
+    // Update product in database (skip in serverless environments)
     const variant = product.variants && product.variants[0];
-    if (variant) {
+    if (variant && query) {
       await query(
         `UPDATE products 
          SET title = $1, 
@@ -232,6 +266,8 @@ export async function shopifyProductUpdateHandler(req: Request, res: Response): 
       );
 
       logger.info(`Product ${product.id} updated in database`);
+    } else if (!query) {
+      logger.info('Skipping database operation in serverless environment');
     }
 
     res.status(200).json({ success: true });

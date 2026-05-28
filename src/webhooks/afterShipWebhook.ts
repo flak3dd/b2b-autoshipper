@@ -2,7 +2,13 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { addTrackingUpdateJob } from '../jobs/queue';
+
+// Conditionally import queue functions to avoid crashes in serverless environments
+let addTrackingUpdateJob: any;
+if (process.env.VERCEL !== '1') {
+  const queueModule = require('../jobs/queue');
+  addTrackingUpdateJob = queueModule.addTrackingUpdateJob;
+}
 
 // Verify AfterShip webhook signature
 export function verifyAfterShipWebhook(req: Request): boolean {
@@ -55,11 +61,15 @@ export async function afterShipTrackingHandler(req: Request, res: Response): Pro
       courier: tracking.courier,
     });
 
-    // Add tracking update job to queue
-    await addTrackingUpdateJob({
-      trackingNumber,
-      webhookData,
-    });
+    // Add tracking update job to queue (skip in serverless environments)
+    if (addTrackingUpdateJob) {
+      await addTrackingUpdateJob({
+        trackingNumber,
+        webhookData,
+      });
+    } else {
+      logger.info('Skipping queue job in serverless environment');
+    }
 
     logger.info(`Tracking update job queued for ${trackingNumber}`);
     res.status(200).json({ success: true });
